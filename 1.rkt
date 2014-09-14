@@ -1,4 +1,4 @@
-;#lang racket
+#lang racket
 
 (require srfi/14)
 ; so that we have char-set:ascii and char-set->list
@@ -58,10 +58,8 @@
 (define hexchar->binstring
   (hash #\0 "0000" #\1 "0001" #\2 "0010" #\3 "0011" #\4 "0100" #\5 "0101" #\6 "0110" #\7 "0111" #\8 "1000" #\9 "1001" #\a "1010" #\b "1011" #\c "1100" #\d "1101" #\e "1110" #\f "1111"))
 
-#|
 (equal? "SSdtIGtpbGxpbmcgeW91ciBicmFpbiBsaWtlIGEgcG9pc29ub3VzIG11c2hyb29t"
         (hex->b64 "49276d206b696c6c696e6720796f757220627261696e206c696b65206120706f69736f6e6f7573206d757368726f6f6d"))
-|#
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; http://cryptopals.com/sets/1/challenges/2/ ;;
@@ -84,20 +82,18 @@
 ; returns another hex buffer
 (define (fixed-xor buf1 buf2)
   (bin->hex
-    (list->string
-      (fixed-xor-bin (string->list (hex->bin buf1))
-                     (string->list (hex->bin buf2))))))
+   (list->string
+    (fixed-xor-bin (string->list (hex->bin buf1))
+                   (string->list (hex->bin buf2))))))
 
 ; fixed xor of two bin lists (of #\0's and #\1's)
 ; returns another bin list (of #\0's and #\1's)
 (define (fixed-xor-bin bin1 bin2)
   (map bitwise-xor (zip bin1 bin2)))
 
-#|
 (equal? (fixed-xor "1c0111001f010100061a024b53535009181c"
                    "686974207468652062756c6c277320657965")
         "746865206b696420646f6e277420706c6179")
-|#
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; http://cryptopals.com/sets/1/challenges/3/ ;;
@@ -125,14 +121,6 @@
          (c-bin-repeated (ascii->bin (make-string len-by-8 c)))]
     (list->string (bin->ascii-ls (fixed-xor-bin hex-s c-bin-repeated)))))
 
-; returns a list of pairs
-; each pair is (x . (f x)) where (f x) is what you get after you take a fixed-length xor
-; of the binary representation of x repeated to match the length of the binary representation of s
-; and decode it as an ASCII string
-; x ranges over all ASCII chars
-(define (single-character-xor-all s)
-  (map (lambda (c) (single-character-xor s c)) the-ascii-chars))
-
 (define (bin->ascii-ls ls)
   (if (empty? ls)
       '()
@@ -144,19 +132,52 @@
 (define (bin->ascii s)
   (list->string (bin->ascii-ls (pad s 8))))
 
-; (define (decode encoded-hex-string key)
-;   (let [(all-decodings (single-character-xor encoded-hex-string))]
-;     (cdr (list-ref all-decodings (char->integer key)))))
+; return a vector of counts of the following characters in
+; the string s: etaoin shrdlu
+(define (occurrences s)
+  (define (occurrences-helper ls counts)
+    (if (empty? ls)
+        counts
+        (begin
+          (cond [(eq? (car ls) #\e) (vector-set! counts 0 (+ 1 (vector-ref counts 0)))]
+                [(eq? (car ls) #\t) (vector-set! counts 1 (+ 1 (vector-ref counts 1)))]
+                [(eq? (car ls) #\a) (vector-set! counts 2 (+ 1 (vector-ref counts 2)))]
+                [(eq? (car ls) #\o) (vector-set! counts 3 (+ 1 (vector-ref counts 3)))]
+                [(eq? (car ls) #\i) (vector-set! counts 4 (+ 1 (vector-ref counts 4)))]
+                [(eq? (car ls) #\n) (vector-set! counts 5 (+ 1 (vector-ref counts 5)))]
+                [(eq? (car ls) #\s) (vector-set! counts 6 (+ 1 (vector-ref counts 6)))]
+                [(eq? (car ls) #\h) (vector-set! counts 7 (+ 1 (vector-ref counts 7)))]
+                [(eq? (car ls) #\r) (vector-set! counts 8 (+ 1 (vector-ref counts 8)))]
+                [(eq? (car ls) #\d) (vector-set! counts 9 (+ 1 (vector-ref counts 9)))]
+                [(eq? (car ls) #\l) (vector-set! counts 10 (+ 1 (vector-ref counts 10)))]
+                [(eq? (car ls) #\u) (vector-set! counts 11 (+ 1 (vector-ref counts 11)))])
+          (occurrences-helper (cdr ls) counts))))
+  (occurrences-helper (string->list s) (make-vector 12 0)))
 
-#|
-(let* [(encoded-hex-string "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736")
-       (decoding (single-character-xor encoded-hex-string #\X))]
-  (equal? decoding "Cooking MC's like a pound of bacon"))
-|#
+; score a string based on its character frequencies
+(define (naive-score s)
+  (let [(naive-scoring (build-vector 12 (λ (x) (/ (- 12 x) 2))))
+        (frequencies (occurrences s))]
+    (foldl + 0 (vector->list (vector-map * naive-scoring frequencies)))))
 
-; todo - instead of decoding by inspection, actually do character frequency scoring
+; this function will find the best decoding for a string
+; first argument is a list of pairs
+; each pair is (c . (scx c)) where (scx c) is the fixed-length xor
+; of the binary representation of c repeated to match the length of
+; the binary representation of s and decode it as an ASCII string.
+; c ranges over all ASCII chars. second argument is a scoring function
+(define (decode-single-char-xor s)
+  ; pick the highest scoring string from a bunch of strings
+  ; f is the scoring function, ls is the list of (c . (single-character-xor s c))
+  ; where c ranges over all the ascii chars
+  (define (highest-scorer ls f)
+    (car (sort ls (λ (x y) (> (f (cdr x)) (f (cdr y)))))))
+  (highest-scorer
+   (map (lambda (c) (cons c (single-character-xor s c))) the-ascii-chars)
+   naive-score))
+
+(decode-single-char-xor "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; http://cryptopals.com/sets/1/challenges/4/ ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
