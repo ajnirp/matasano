@@ -65,15 +65,16 @@
 ;; http://cryptopals.com/sets/1/challenges/2/ ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(define (bin->hex-ls ls)
+  (if (empty? ls)
+      '()
+      (let [(first-4 (take ls 4))
+            (remaining (drop ls 4))]
+        (cons (binstring->hexchar first-4)
+              (bin->hex-ls remaining)))))
+
 (define (bin->hex string)
-  (define (bin->hex-helper ls)
-    (if (empty? ls)
-        '()
-        (let [(first-4 (take ls 4))
-              (remaining (drop ls 4))]
-          (cons (binstring->hexchar first-4)
-                (bin->hex-helper remaining)))))
-  (list->string (bin->hex-helper (pad string 4))))
+  (list->string (bin->hex-ls (pad string 4))))
 
 (define (binstring->hexchar ls)
   (string-ref (number->string (string->number (list->string ls) 2) 16) 0))
@@ -83,12 +84,12 @@
 (define (fixed-xor buf1 buf2)
   (bin->hex
    (list->string
-    (fixed-xor-bin (string->list (hex->bin buf1))
-                   (string->list (hex->bin buf2))))))
+    (fixed-xor-ls (string->list (hex->bin buf1))
+                  (string->list (hex->bin buf2))))))
 
 ; fixed xor of two bin lists (of #\0's and #\1's)
 ; returns another bin list (of #\0's and #\1's)
-(define (fixed-xor-bin bin1 bin2)
+(define (fixed-xor-ls bin1 bin2)
   (map bitwise-xor (zip bin1 bin2)))
 
 (equal? (fixed-xor "1c0111001f010100061a024b53535009181c"
@@ -119,7 +120,7 @@
   (let* [(hex-s (pad (hex->bin s) 8)) ; s converted to a list and padded with #\0's
          (len-by-8 (/ (length hex-s) 8)) ; length of this list divided by 8
          (c-bin-repeated (ascii->bin (make-string len-by-8 c)))]
-    (list->string (bin->ascii-ls (fixed-xor-bin hex-s c-bin-repeated)))))
+    (list->string (bin->ascii-ls (fixed-xor-ls hex-s c-bin-repeated)))))
 
 (define (bin->ascii-ls ls)
   (if (empty? ls)
@@ -160,6 +161,12 @@
         (frequencies (occurrences s))]
     (foldl + 0 (vector->list (vector-map * naive-scoring frequencies)))))
 
+; pick the highest scoring string from a bunch of strings
+; f is the scoring function, ls is the list of (c . (single-character-xor s c))
+; where c ranges over all the ascii chars
+(define (highest-scorer ls f)
+  (car (sort ls (λ (x y) (> (f (cdr x)) (f (cdr y)))))))
+
 ; this function will find the best decoding for a string
 ; first argument is a list of pairs
 ; each pair is (c . (scx c)) where (scx c) is the fixed-length xor
@@ -167,11 +174,6 @@
 ; the binary representation of s and decode it as an ASCII string.
 ; c ranges over all ASCII chars. second argument is a scoring function
 (define (decode-single-char-xor s)
-  ; pick the highest scoring string from a bunch of strings
-  ; f is the scoring function, ls is the list of (c . (single-character-xor s c))
-  ; where c ranges over all the ascii chars
-  (define (highest-scorer ls f)
-    (car (sort ls (λ (x y) (> (f (cdr x)) (f (cdr y)))))))
   (highest-scorer
    (map (lambda (c) (cons c (single-character-xor s c))) the-ascii-chars)
    naive-score))
@@ -181,3 +183,63 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; http://cryptopals.com/sets/1/challenges/4/ ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define (read-lines input-port lines)
+  (let [(line (read-line input-port))]
+    (if (eq? line eof)
+        lines
+        (read-lines input-port (cons line lines)))))
+
+(define (find-encoded-string filename)
+  (let* [(hex-strings
+          (call-with-input-file filename
+            (λ (input-port) (read-lines input-port '()))))
+         (decodings (map decode-single-char-xor hex-strings))]
+    (highest-scorer decodings naive-score)))
+
+;(find-encoded-string "4.txt")
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; http://cryptopals.com/sets/1/challenges/5/ ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define burning-em "Burning 'em, if you ain't quick and nimble")
+(define crazy-cymbal "I go crazy when I hear a cymbal")
+
+; take a key represented by an ASCII string, and convert it to a list
+; of bits such that the length of the bit list is len
+; in theory, this may not always be possible e.g. if the key is 24 bits long
+; and the requested length is 100
+; however, in practice, the requested length will always be a multiple of 8
+; since the requested length itself will be eight times the length of
+; an ASCII string which the key has to encrypt
+(define (repeating-key-xor s k)
+  (let* [(len-s (string-length s))
+         (len-k (string-length k))
+         (repeated-key (build-list len-s (λ (idx) (string-ref k (remainder idx len-k)))))
+         (rep-key-bin (apply append (map ascii-char->bin repeated-key)))
+         (string-bin (ascii->bin s))
+         (xor-bin (fixed-xor-ls rep-key-bin string-bin))]
+    (list->string (bin->hex-ls xor-bin))))
+
+(equal? "0b3637272a2b2e63622c2e69692a23693a2a3c6324202d623d63343c2a26226324272765272a282b2f20430a652e2c652a3124333a653e2b2027630c692b20283165286326302e27282f"
+        (repeating-key-xor "Burning 'em, if you ain't quick and nimble\nI go crazy when I hear a cymbal" "ICE"))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; http://cryptopals.com/sets/1/challenges/6/ ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; returns the number of bits
+(define (hamming-distance-ls ls1 ls2)
+  (define (hd-ls-helper ls1 ls2 differing-bits)
+    (cond [(empty? ls1) differing-bits]
+          [(empty? ls2) differing-bits]
+          [(eq? (car ls1) (car ls2)) (hd-ls-helper (cdr ls1) (cdr ls2) differing-bits)]
+          [else (hd-ls-helper (cdr ls1) (cdr ls2) (+ 1 differing-bits))]))
+  (hd-ls-helper ls1 ls2 0))
+
+(define (hamming-distance s1 s2)
+  (hamming-distance-ls (ascii->bin s1) (ascii->bin s2)))
+
+; test for hamming distance
+; (= 37 (hamming-distance "this is a test" "wokka wokka!!!"))
